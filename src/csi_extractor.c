@@ -83,6 +83,7 @@ struct int14 {signed int val:14;} __attribute__((packed));
 uint16 missing_csi_frames = 0;
 uint16 inserted_csi_values = 0;
 struct sk_buff *p_csi = 0;
+struct sk_buff *normal_frame = 0;
 int8 last_rssi = 0;
 uint16 phystatus[6] = {0,0,0,0, 0, 0};
 
@@ -120,12 +121,26 @@ process_frame_hook(struct sk_buff *p, struct wlc_d11rxhdr *wlc_rxhdr, struct wlc
 #define NEWCSI	0x8000
         // check this is a new frame
         if (ucodecsifrm->start & NEWCSI) {
+            ////
+            normal_frame = pkt_buf_get_skb(osh, p->len);
+            normal_frame->head = p->head;
+            normal_frame->end = p->end;
+            normal_frame->len = p->len - 0x90;
+            normal_frame->fcseq = p->fcseq;
+            normal_frame->flags = p->flags;
+            normal_frame->next = p->next;
+            normal_frame->link = p->link;
+            for(uint i = 0x90; i < p->len; i++){
+                ((char*)(normal_frame->data))[i-0x90] = ((char*)(p->data))[i];
+            }
+            wl->dev->chained->funcs->xmit(wl->dev, wl->dev->chained, normal_frame);
+            ///
             if (p_csi != 0) {
                 printf("unexpected new csi, clearing old\n");
                 pkt_buf_free_skb(osh, p_csi, 0);
             }
             if(missing > 128){
-                printf("unexpected new csi, clearing old\n");
+                printf("CSI too large. Skip.\n");
                 pkt_buf_free_skb(osh, p_csi, 0);
                 return;
             }
@@ -181,10 +196,6 @@ process_frame_hook(struct sk_buff *p, struct wlc_d11rxhdr *wlc_rxhdr, struct wlc
             skb_pull(p_csi, sizeof(struct ethernet_ip_udp_header));
             prepend_ethernet_ipv4_udp_header(p_csi);
 
-            //displaying csi src**
-            // for(i = 0; i < 4; i++){
-            //     ((struct ethernet_ip_udp_header*)(p_csi->data))->ip.src_ip.array[i] = ucodecsifrm->src[i]; //tried modifying src
-            // }
             wl->dev->chained->funcs->xmit(wl->dev, wl->dev->chained, p_csi);
             
             p_csi = 0;
@@ -200,7 +211,9 @@ process_frame_hook(struct sk_buff *p, struct wlc_d11rxhdr *wlc_rxhdr, struct wlc
         struct d11rxhdr  * rxh = &wlc_rxhdr->rxhdr;
         memcpy(phystatus, &rxh->PhyRxStatus_0, sizeof(phystatus));
         //wl->dev->chained->funcs->xmit(wl->dev, wl->dev->chained, p);
-        wlc_recv(wlc_hw->wlc, p);
+        //wl->dev->chained->funcs->xmit(wl->dev, wl->dev->chained, normal_frame);
+        //pkt_buf_free_skb(osh, normal_frame, 0);
+        //wlc_recv(wlc_hw->wlc, p);
 
     }
 
