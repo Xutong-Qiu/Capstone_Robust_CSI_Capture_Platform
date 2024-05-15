@@ -111,111 +111,33 @@ create_new_csi_frame(struct wl_info *wl, uint16 csiconf, int length)
 void
 process_frame_hook(struct sk_buff *p, struct wlc_d11rxhdr *wlc_rxhdr, struct wlc_hw_info *wlc_hw, int tsf_l)
 {
-    struct osl_info *osh = wlc_hw->wlc->osh;
     struct wl_info *wl = wlc_hw->wlc->wl;
-    if (wlc_rxhdr->rxhdr.Pad) {
-        struct d11csihdr *ucodecsifrm = (struct d11csihdr *) &(wlc_rxhdr->rxhdr.Pad);
-        int missing = ucodecsifrm->NexmonCSICfg & 0xff;
-        int tones = CSIDATA_PER_CHUNK>>2;
-        uint16 csiconf = ucodecsifrm->csiconf;
-#define NEWCSI	0x8000
-        // check this is a new frame
-        if (ucodecsifrm->start & NEWCSI) {
-            ////
-            normal_frame = pkt_buf_get_skb(osh, p->len);
+     struct osl_info *osh = wlc_hw->wlc->osh;
+     
+        // wlc_rxhdr->tsf_l = tsf_l;
+        // wlc_phy_rssi_compute(wlc_hw->band->pi, wlc_rxhdr);
+        // last_rssi = wlc_rxhdr->rssi;
+        // struct d11rxhdr  * rxh = &wlc_rxhdr->rxhdr;
+        // memcpy(phystatus, &rxh->PhyRxStatus_0, sizeof(phystatus));
+        //wlc_recv(wlc_hw->wlc, p);
+         normal_frame = pkt_buf_get_skb(osh, p->len - 0x84);
             normal_frame->head = p->head;
             normal_frame->end = p->end;
-            normal_frame->len = p->len - 0x90;
+            normal_frame->len = p->len - 0x84;
             normal_frame->fcseq = p->fcseq;
             normal_frame->flags = p->flags;
             normal_frame->next = p->next;
             normal_frame->link = p->link;
-            for(uint i = 0x90; i < p->len; i++){
-                ((char*)(normal_frame->data))[i-0x90] = ((char*)(p->data))[i];
+            for(uint i = 0x84; i < p->len; i++){
+                ((char*)(normal_frame->data))[i-0x84] = ((char*)(p->data))[i];
             }
-            wl->dev->chained->funcs->xmit(wl->dev, wl->dev->chained, normal_frame);
-            ///
-            if (p_csi != 0) {
-                printf("unexpected new csi, clearing old\n");
-                pkt_buf_free_skb(osh, p_csi, 0);
-            }
-            if(missing > 128){
-                printf("CSI too large. Skip.\n");
-                pkt_buf_free_skb(osh, p_csi, 0);
-                return;
-            }
-            create_new_csi_frame(wl, csiconf, missing * CSIDATA_PER_CHUNK);
-            if (p_csi == 0) {
-                printf("unable to allocate csi frame\n");
-                pkt_buf_free_skb(osh, p, 0);
-                return;
-            }
-            missing_csi_frames = missing;
-            inserted_csi_values = 0;
-        }
-        else if (p_csi == 0) {
-            printf("unexpected csi data\n");
-            pkt_buf_free_skb(osh, p, 0);
-            return;
-        }
-        else if (missing != missing_csi_frames) {
-            printf("number of missing frames mismatch\n");
-            pkt_buf_free_skb(osh, p, 0);
-            pkt_buf_free_skb(osh, p_csi, 0);
-            p_csi = 0;
-            return;
-        }
-
-        struct csi_udp_frame *udpfrm = (struct csi_udp_frame *) p_csi->data;
-
-        int i;
-        for (i = 0; i < tones; i ++) {
-            // csi format
-            // for bcm4358:
-            // sign(1bit) real(9bit) sign(1bit) imag(9bit) exp(5bit)
-            // for bcm4366c0:
-            // sign(1bit) real(12bit) sign(1bit) imag(12bit) exp(6bit)
-            // forward as uint32 and unpack in user application
-
-            udpfrm->csi_values[inserted_csi_values] = ucodecsifrm->csi[i];
-            inserted_csi_values++;
-        }
-
-        missing_csi_frames --;
-        // send csi udp to host
-        if (missing_csi_frames == 0) {
-            memcpy(udpfrm->SrcMac, &(ucodecsifrm->src), sizeof(udpfrm->SrcMac));
-            udpfrm->seqCnt = ucodecsifrm->seqcnt;
-            uint8 bw = (udpfrm->chanspec & 0x3800) >> 11;
-	    //BW 2 (20Mhz) ->  payload 28:36 are unused (tested on BCM4358 (Nexus 6P) and BCM43455c0 (Raspberry PI))
-            uint8 offset = (bw == 2) ? 28 : 0; 
-	    //Description of the bits: https://github.com/MerlinRdev/86u-merlin/blob/master/release/src-rt-5.02hnd/bcmdrivers/broadcom/net/wl/impl51/4365/src/include/d11.h#L2935
-            memcpy(&udpfrm->csi_values[offset], phystatus, sizeof(phystatus));
-
-            p_csi->len = sizeof(struct csi_udp_frame) + inserted_csi_values * sizeof(uint32);
-            skb_pull(p_csi, sizeof(struct ethernet_ip_udp_header));
-            prepend_ethernet_ipv4_udp_header(p_csi);
-
-            wl->dev->chained->funcs->xmit(wl->dev, wl->dev->chained, p_csi);
-            
-            p_csi = 0;
-        }
+        // char init_values[] = {0x00, 0x00, 0x24, 0x00, 0x6f, 0x08, 0x00, 0x40, 0x80, 0xc6, 0x81, 0xa0, 0x00, 0x00, 0x00, 0x00,
+        //                         0x12, 0x0c, 0x7c, 0x15, 0x40,0x01, 0xe5, 0xa9, 0x01, 0x00, 0x00, 0x10, 0x18, 0x03, 0x04, 0x00,
+        //                         0x02, 0x00, 0x00, 0xCC};
+        // memcpy(normal_frame->data+ p->len - 36, init_values, sizeof(init_values));
+        wl->dev->chained->funcs->xmit(wl->dev, wl->dev->chained, normal_frame);
         pkt_buf_free_skb(osh, p, 0);
-        return;
-
-
-    }else{//no a valid csi
-        wlc_rxhdr->tsf_l = tsf_l;
-        wlc_phy_rssi_compute(wlc_hw->band->pi, wlc_rxhdr);
-        last_rssi = wlc_rxhdr->rssi;
-        struct d11rxhdr  * rxh = &wlc_rxhdr->rxhdr;
-        memcpy(phystatus, &rxh->PhyRxStatus_0, sizeof(phystatus));
-        //wl->dev->chained->funcs->xmit(wl->dev, wl->dev->chained, p);
-        //wl->dev->chained->funcs->xmit(wl->dev, wl->dev->chained, normal_frame);
-        //pkt_buf_free_skb(osh, normal_frame, 0);
         //wlc_recv(wlc_hw->wlc, p);
-
-    }
 
     
 }
