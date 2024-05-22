@@ -11,7 +11,9 @@ This project requires the `libssh` C++ library and C++11 or later.
 
 ### Setup
 
-Run the script `./upload_and_setup.sh` to distribute the code to Pi hosts.
+1. Compile the code using `make`
+2. Run the script `./pi_code_setup.sh` to generate the code for Pi hosts.
+3. Run the script `./upload_and_setup.sh` to distribute the code to Pi hosts.
 
 ### Running the Capture Script
 
